@@ -7,7 +7,7 @@ This brief captures planning from a conversation about TCU's Chancellor's Innova
 ## The Project
 
 **Repo:** https://github.com/TCU-DCDA/addran-advisor-chat
-**Live:** https://addran-advisor-9125e.web.app
+**Live:** https://sandra.digitcu.org
 **Stack:** Firebase Hosting + Functions + Firestore, Claude API (Sonnet)
 **What it does:** AI-powered chatbot for students considering majors in AddRan College of Liberal Arts at TCU. Covers 37 programs with requirements, URLs, and program details.
 
@@ -30,9 +30,9 @@ Dr. Rode is planning to submit this project to TCU's inaugural Chancellor's Inno
 **Proposal narrative:** Faculty advisors in small programs are the single point of failure for routine advising questions. This doesn't scale, and students who can't get timely answers make avoidable mistakes. The chatbot handles routine advising queries using public program data — no FERPA exposure — and can scale across departments.
 
 **Three AI components in the proposal:**
-1. Conversational advising interface (Claude API chatbot) — already built
-2. Automated article discovery and curation pipeline — to be built
-3. Advising knowledge base (program data, career pathways, requirements) — partially built
+1. Conversational advising interface (Claude API chatbot) — built and deployed
+2. Automated article discovery and curation pipeline — built (RSS + OpenAlex + admin dashboard)
+3. Advising knowledge base (program data, career pathways, requirements) — built (60 program files + wizard manifests via hub-and-spoke integration)
 
 ## New Feature: Article Curation Pipeline
 
@@ -88,23 +88,30 @@ These were identified as strong candidates during planning:
    - URL: https://www.ccdaily.com/2025/09/why-liberal-arts-matter-even-in-the-age-of-ai/
    - Tags: employer-data, career-outcomes, family-talking-points
 
-## Existing Repo Structure
+## Repo Structure
 
 ```
 ├── firebase.json
 ├── firestore.rules
 ├── firestore.indexes.json
 ├── functions/
-│   ├── index.js           # Cloud Function (API endpoint)
+│   ├── index.js               # Cloud Function (API endpoint)
+│   ├── manifest-loader.js     # Wizard manifest fetcher + TTL cache
+│   ├── manifest-to-context.js # Manifest → Sandra context conversion
+│   ├── wizard-registry.json   # Manifest URLs per department wizard
 │   ├── programs.csv
-│   ├── dcda-data.json
 │   ├── core-curriculum.json
-│   └── support-resources.csv
+│   ├── support-resources.csv
+│   ├── schemas/               # Manifest schema (CI version check)
+│   └── program-data/          # Static fallback JSON files (60 programs)
 ├── public/
 │   ├── index.html         # Chat UI
+│   ├── admin.html         # Admin dashboard
 │   ├── app.js             # Frontend JavaScript
-│   └── style.css
-├── prompts/               # System prompts for Claude
+│   ├── admin.js            # Admin dashboard JavaScript
+│   ├── style.css
+│   └── admin.css
+├── prompts/               # System prompts for Claude (reference copy)
 └── files/
     └── CLAUDE.md          # AI assistant reference
 ```
@@ -118,8 +125,8 @@ These were identified as strong candidates during planning:
 
 ## Other Related Projects
 
-- **English Advising Wizard:** https://github.com/TCU-DCDA/english-advising-wizard (React/Vite/Tailwind, requirements tracking for English department)
-- **DCDA Advising Chat:** https://dcda-advisor-chat.web.app/ (separate tool, DCDA-specific)
+- **Engelina (English Advising Wizard):** https://github.com/TCU-DCDA/english-advising-wizard — React/Vite/Tailwind, requirements tracking for English department. Produces manifest consumed by Sandra.
+- **Ada (DCDA Advising Wizard):** https://dcda-advisor-mobile.web.app — React/TypeScript/Vite, mobile-first degree planner. Produces manifest consumed by Sandra.
 - **CDEx Inventory Management:** https://inventory.digitcu.org/
 
 ## Notes

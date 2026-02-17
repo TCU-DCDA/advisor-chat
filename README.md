@@ -80,11 +80,14 @@ firebase deploy
 ├── firestore.rules        # Firestore security rules
 ├── functions/
 │   ├── index.js           # Cloud Function (API endpoint)
+│   ├── manifest-loader.js # Wizard manifest fetcher + TTL cache (Phase 3)
+│   ├── manifest-to-context.js # Converts manifests to Sandra context (Phase 3)
+│   ├── wizard-registry.json   # Manifest URLs per department wizard (Phase 3)
 │   ├── programs.csv       # Program list (37 programs)
-│   ├── dcda-data.json     # DCDA program details
 │   ├── core-curriculum.json
 │   ├── support-resources.csv
-│   └── program-data/      # 60 JSON files (auto-loaded at startup)
+│   ├── schemas/           # Manifest schema (copied from source of truth)
+│   └── program-data/      # 60 JSON files (fallback for non-wizard departments)
 │       ├── anthropology.json
 │       ├── english.json
 │       ├── ...
@@ -105,12 +108,13 @@ firebase deploy
 
 - 60 program detail JSON files covering all 37 AddRan programs (BA, BS, Minor, Interdisciplinary Minor, Military Commission variants)
 - Program URLs, descriptions, requirements, career options, and contacts
-- DCDA and English department details
+- DCDA and English department data via live wizard manifests (Phase 3 — hub-and-spoke integration)
 - Core Curriculum requirements (Fall 2025+)
 - Support resource redirects
 - Article curation pipeline (RSS feeds, OpenAlex, admin dashboard)
 - Admin dashboard with article management, conversation analytics, feedback tracking, and CSV export
 - AI disclaimers (accuracy warning + data freshness notice)
+- Manifest loader with TTL caching, Firestore durable cache, and static fallbacks (Phase 3)
 
 ### ❓ Still Needed
 
