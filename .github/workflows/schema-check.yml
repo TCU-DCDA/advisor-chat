@@ -1,4 +1,4 @@
-name: Schema Version Check
+name: CI
 
 on:
   push:
@@ -32,3 +32,19 @@ jobs:
           fi
 
           echo "Schema versions match."
+
+  syntax-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Syntax check
+        run: npm run lint
