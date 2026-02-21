@@ -32,6 +32,10 @@ window.addEventListener("message", (event) => {
         greetingEl.textContent = `Hi! I'm Sandra, your advising assistant. I can see your ${label} degree progress \u2014 ask me anything about your courses, requirements, or what to take next!`;
       }
     }
+    // Swap prompt chips to program-specific ones
+    const programId = event.data.programId;
+    const wizardPool = (programId && WIZARD_PROMPT_POOLS[programId]) || WIZARD_PROMPT_FALLBACK;
+    renderSuggestedPrompts(wizardPool);
   }
 });
 
@@ -360,16 +364,59 @@ const PROMPT_POOL = [
   { label: "Writing & Rhetoric", prompt: "Tell me about the Writing and Rhetoric program" },
 ];
 
-function renderSuggestedPrompts() {
+// Program-specific prompts for wizard-embedded mode
+const WIZARD_PROMPT_POOLS = {
+  english: [
+    { label: "What should I take next?", prompt: "Based on what I've completed, what courses should I take next?" },
+    { label: "Am I on track?", prompt: "Am I on track to graduate on time?" },
+    { label: "Elective ideas", prompt: "What upper-division English electives do you recommend?" },
+    { label: "Lower-div limit", prompt: "How does the lower-division hour limit work for English?" },
+    { label: "Senior seminar", prompt: "When should I take the senior seminar?" },
+    { label: "Career paths", prompt: "What careers can I pursue with an English degree?" },
+    { label: "Double major?", prompt: "Can I double major or add a minor with English?" },
+    { label: "Literature vs. language", prompt: "What's the difference between the literature and language courses?" },
+  ],
+  writing: [
+    { label: "What should I take next?", prompt: "Based on what I've completed, what courses should I take next?" },
+    { label: "Am I on track?", prompt: "Am I on track to graduate on time?" },
+    { label: "WRIT electives", prompt: "What Writing & Rhetoric electives do you recommend?" },
+    { label: "Lower-div limit", prompt: "How does the lower-division hour limit work for Writing & Rhetoric?" },
+    { label: "Rhetoric vs. writing", prompt: "What's the difference between rhetoric and writing courses?" },
+    { label: "Career paths", prompt: "What careers can I pursue with a Writing & Rhetoric degree?" },
+    { label: "Internships", prompt: "Are there internship opportunities for Writing & Rhetoric majors?" },
+    { label: "Portfolio tips", prompt: "How should I build a writing portfolio during my degree?" },
+  ],
+  creativeWriting: [
+    { label: "What should I take next?", prompt: "Based on what I've completed, what courses should I take next?" },
+    { label: "Am I on track?", prompt: "Am I on track to graduate on time?" },
+    { label: "Workshop courses", prompt: "Which creative writing workshops should I take?" },
+    { label: "Lower-div limit", prompt: "How does the lower-division hour limit work for Creative Writing?" },
+    { label: "Genre focus", prompt: "Can I focus on a specific genre like fiction or poetry?" },
+    { label: "Career paths", prompt: "What careers can I pursue with a Creative Writing degree?" },
+    { label: "Senior project", prompt: "What's involved in the senior creative writing project?" },
+    { label: "Publishing tips", prompt: "How can I start getting published while still in school?" },
+  ],
+};
+
+// Shared fallback for wizard mode when program ID isn't recognized
+const WIZARD_PROMPT_FALLBACK = [
+  { label: "What should I take next?", prompt: "Based on what I've completed, what courses should I take next?" },
+  { label: "Am I on track?", prompt: "Am I on track to graduate on time?" },
+  { label: "Elective ideas", prompt: "What electives do you recommend for my major?" },
+  { label: "Career paths", prompt: "What careers can I pursue with my degree?" },
+];
+
+function renderSuggestedPrompts(pool) {
   const container = document.getElementById("suggested-prompts");
   if (!container) return;
 
+  const source = pool || PROMPT_POOL;
   // Shuffle and pick 4
-  const shuffled = [...PROMPT_POOL].sort(() => Math.random() - 0.5);
+  const shuffled = [...source].sort(() => Math.random() - 0.5);
   const selected = shuffled.slice(0, 4);
 
   container.innerHTML = selected.map(p =>
-    `<button class="prompt-chip" data-prompt="${p.prompt}">${p.label}</button>`
+    `<button class="prompt-chip" data-prompt="${escapeHtml(p.prompt)}">${escapeHtml(p.label)}</button>`
   ).join("");
 
   container.querySelectorAll(".prompt-chip").forEach(chip => {
