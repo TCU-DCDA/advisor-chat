@@ -24,11 +24,12 @@ window.addEventListener("message", (event) => {
     if (wizardContext && userInput) {
       userInput.placeholder = "Ask about your courses, requirements, what to take next...";
     }
-    // Update greeting to be department-specific
-    if (event.data.department && messagesContainer) {
+    // Update greeting to be program-specific
+    if (messagesContainer) {
       const greetingEl = messagesContainer.querySelector(".message.assistant .message-content p");
       if (greetingEl) {
-        greetingEl.textContent = `Hi! I'm Sandra, your advising assistant. I can see your ${event.data.department} degree progress \u2014 ask me anything about your courses, requirements, or what to take next!`;
+        const label = event.data.programName || event.data.department || "your";
+        greetingEl.textContent = `Hi! I'm Sandra, your advising assistant. I can see your ${label} degree progress \u2014 ask me anything about your courses, requirements, or what to take next!`;
       }
     }
   }
