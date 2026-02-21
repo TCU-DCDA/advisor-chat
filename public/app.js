@@ -6,6 +6,34 @@ const clearBtn = document.getElementById("clear-btn");
 const themeToggle = document.getElementById("theme-toggle");
 const exportBtn = document.getElementById("export-btn");
 
+// Embed mode: when loaded inside an advising wizard iframe
+const isEmbedded = new URLSearchParams(window.location.search).get("embed") === "true";
+let wizardContext = null;
+
+if (isEmbedded) {
+  document.body.classList.add("embed-mode");
+  // Start with a fresh conversation in embed mode (don't restore previous)
+  localStorage.removeItem("conversationHistory");
+}
+
+// Listen for wizard context from parent iframe
+window.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "wizard-context") {
+    wizardContext = event.data.context;
+    // Update placeholder to hint that Sandra knows the student's context
+    if (wizardContext && userInput) {
+      userInput.placeholder = "Ask about your courses, requirements, what to take next...";
+    }
+    // Update greeting to be department-specific
+    if (event.data.department && messagesContainer) {
+      const greetingEl = messagesContainer.querySelector(".message.assistant .message-content p");
+      if (greetingEl) {
+        greetingEl.textContent = `Hi! I'm Sandra, your advising assistant. I can see your ${event.data.department} degree progress \u2014 ask me anything about your courses, requirements, or what to take next!`;
+      }
+    }
+  }
+});
+
 let conversationHistory = JSON.parse(localStorage.getItem("conversationHistory") || "[]");
 
 // Dark mode handling
@@ -231,6 +259,7 @@ async function sendMessage(message) {
       body: JSON.stringify({
         message: message,
         conversationHistory: conversationHistory.map(({ role, content }) => ({ role, content })),
+        ...(wizardContext ? { wizardContext } : {}),
       }),
     });
 

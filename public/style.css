@@ -739,3 +739,26 @@ body {
     padding: 0.15rem 0.5rem;
   }
 }
+
+/* Embed mode — when Sandra is loaded inside a wizard iframe */
+body.embed-mode {
+  padding: 0;
+  background: var(--bg-container);
+  align-items: stretch;
+}
+
+body.embed-mode .chat-container {
+  max-width: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body.embed-mode .chat-header {
+  display: none;
+}
+
+body.embed-mode .disclaimer {
+  display: none;
+}
