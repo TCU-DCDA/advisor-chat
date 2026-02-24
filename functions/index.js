@@ -1009,17 +1009,24 @@ Return ONLY valid JSON, no markdown fences.`,
       ? parsed.relevanceScore
       : null;
 
+    // Auto-reject articles scored 4 or below
+    const autoRejected = relevanceScore != null && relevanceScore <= 4;
+
     // Update the Firestore document
-    await db.collection("articles").doc(articleDocId).update({
+    const updateData = {
       summary: parsed.summary || rawSummary,
       tags: validTags.length > 0 ? validTags : ["research"],
       relevanceScore: relevanceScore,
       relevanceReason: parsed.relevanceReason || null,
       ai_curated: true,
       updated_at: new Date()
-    });
+    };
+    if (autoRejected) {
+      updateData.status = "rejected";
+    }
+    await db.collection("articles").doc(articleDocId).update(updateData);
 
-    console.log(`AI curated article "${title}" — score: ${relevanceScore}/10, tags: ${validTags.join(", ")}`);
+    console.log(`AI curated article "${title}" — score: ${relevanceScore}/10, tags: ${validTags.join(", ")}${autoRejected ? " [auto-rejected]" : ""}`);
     return true;
   } catch (error) {
     console.warn(`AI curation failed for "${title}":`, error.message);
