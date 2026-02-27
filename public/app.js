@@ -18,6 +18,7 @@ function showToast(message, duration = 3000) {
 // Embed mode: when loaded inside an advising wizard iframe
 const isEmbedded = new URLSearchParams(window.location.search).get("embed") === "true";
 let wizardContext = null;
+let personaName = null;
 
 if (isEmbedded) {
   document.body.classList.add("embed-mode");
@@ -37,16 +38,18 @@ window.addEventListener("message", (event) => {
   if (!ALLOWED_ORIGINS.includes(event.origin)) return;
   if (event.data && event.data.type === "wizard-context") {
     wizardContext = event.data.context;
-    // Update placeholder to hint that Sandra knows the student's context
+    personaName = event.data.personaName || null;
+    // Update placeholder to hint that the assistant knows the student's context
     if (wizardContext && userInput) {
       userInput.placeholder = "Ask about your courses, requirements, what to take next...";
     }
-    // Update greeting to be program-specific
+    // Update greeting to be program-specific with persona name
     if (messagesContainer) {
       const greetingEl = messagesContainer.querySelector(".message.assistant .message-content p");
       if (greetingEl) {
         const label = event.data.programName || event.data.department || "your";
-        greetingEl.textContent = `Hi! I'm Sandra, your advising assistant. I can see your ${label} degree progress \u2014 ask me anything about your courses, requirements, or what to take next!`;
+        const name = personaName || "your advising assistant";
+        greetingEl.textContent = `Hi! I'm ${name}, your advising assistant. I can see your ${label} degree progress \u2014 ask me anything about your courses, requirements, or what to take next!`;
       }
     }
     // Swap prompt chips to program-specific ones
@@ -95,7 +98,7 @@ clearBtn.addEventListener("click", () => {
     <div class="message assistant">
       <span class="avatar assistant-avatar"></span>
       <div class="message-content">
-        <p>Hi! I'm here to help you explore programs in AddRan College of Liberal Arts. What would you like to know?</p>
+        <p>Hi! I'm your advising assistant. What would you like to know?</p>
       </div>
     </div>
     <div class="suggested-prompts" id="suggested-prompts">
@@ -282,6 +285,7 @@ async function sendMessage(message) {
         message: message,
         conversationHistory: conversationHistory.map(({ role, content }) => ({ role, content })),
         ...(wizardContext ? { wizardContext } : {}),
+        ...(personaName ? { personaName } : {}),
       }),
     });
 
@@ -880,7 +884,7 @@ function pdfDrawDisclaimer(doc, y, margin, contentWidth) {
   doc.setFont("helvetica", "italic");
   doc.setFontSize(8);
   doc.setTextColor(136, 136, 136);
-  const disclaimer = "AI-generated responses may contain errors. Program details reflect the most recent data update and may not match the latest catalog. Confirm details with your advisor or department. Conversations are not linked to your student records. When used within an advising wizard, Sandra can see your course selections for that session.";
+  const disclaimer = "AI-generated responses may contain errors. Program details reflect the most recent data update and may not match the latest catalog. Confirm details with your advisor or department. Conversations are not linked to your student records. When used within an advising wizard, the assistant can see your course selections for that session.";
   const lines = doc.splitTextToSize(disclaimer, contentWidth);
   for (const line of lines) {
     doc.text(line, margin, y);

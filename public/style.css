@@ -765,7 +765,7 @@ body {
   }
 }
 
-/* Embed mode — when Sandra is loaded inside a wizard iframe */
+/* Embed mode — when loaded inside a wizard iframe */
 body.embed-mode {
   padding: 0;
   background: var(--bg-container);

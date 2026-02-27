@@ -298,9 +298,19 @@ const anthropic = new Anthropic({
 });
 
 // System prompt for the AddRan advisor chatbot
-const SYSTEM_PROMPT = `You are Sandra, a friendly advisor for AddRan College of Liberal Arts at TCU. Help students explore majors, minors, and certificates.
+// personaName is passed from the embedding wizard (e.g. "Engelina", "Ada")
+function buildSystemPrompt(personaName) {
+  const name = personaName || "your AddRan advising assistant";
+  const intro = personaName
+    ? `You are ${name}, a friendly advisor for AddRan College of Liberal Arts at TCU.`
+    : `You are a friendly advisor for AddRan College of Liberal Arts at TCU.`;
+  const greeting = personaName
+    ? `If this is the start of a conversation, briefly introduce yourself: "Hi, I'm ${name}, your advising assistant!"`
+    : `If this is the start of a conversation, briefly introduce yourself: "Hi, I'm your AddRan advising assistant!"`;
 
-If this is the start of a conversation, briefly introduce yourself: "Hi, I'm Sandra, your AddRan advising assistant!"
+  return `${intro} Help students explore majors, minors, and certificates.
+
+${greeting}
 
 CRITICAL RULES:
 - Keep responses under 100 words total
@@ -327,6 +337,7 @@ SENSITIVE TOPICS — redirect with care and empathy:
 
 REDIRECT TOPICS (provide the URL when redirecting):
 ${supportResources.map(r => `- ${r.name}: ${r.url}`).join("\n")}`;
+}
 
 exports.api = onRequest(
   {
@@ -353,7 +364,7 @@ exports.api = onRequest(
     }
 
     try {
-      const { message, conversationHistory = [], wizardContext } = req.body;
+      const { message, conversationHistory = [], wizardContext, personaName } = req.body;
 
       if (!message) {
         res.status(400).json({ error: "Message is required" });
@@ -433,7 +444,7 @@ exports.api = onRequest(
       const response = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1024,
-        system: SYSTEM_PROMPT + wizardContextBlock + programContext + abbreviationsContext + manifestContext + programDetailsContext + coreCurriculumContext + laResearchContext + articlesContext,
+        system: buildSystemPrompt(personaName) + wizardContextBlock + programContext + abbreviationsContext + manifestContext + programDetailsContext + coreCurriculumContext + laResearchContext + articlesContext,
         messages: messages,
       });
 

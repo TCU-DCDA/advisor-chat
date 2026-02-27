@@ -7,7 +7,16 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="chat-container">
+  <!-- Standalone access is disabled — chat is only available embedded in advising wizards -->
+  <div id="unavailable" class="chat-container" style="display:flex;align-items:center;justify-content:center;min-height:100vh;">
+    <div style="text-align:center;padding:2rem;">
+      <h1 style="font-size:1.25rem;font-weight:600;margin-bottom:0.5rem;">Page Not Available</h1>
+      <p style="color:#666;">This service is no longer available.</p>
+    </div>
+  </div>
+
+  <!-- Chat UI — only shown when loaded as embed inside a wizard iframe -->
+  <div id="chat-app" class="chat-container" style="display:none;">
     <header class="chat-header">
       <div class="header-top">
         <img src="images/addran-wordmark.svg" alt="AddRan College" class="header-logo">
@@ -42,14 +51,14 @@
       <div class="message assistant">
         <span class="avatar assistant-avatar"></span>
         <div class="message-content">
-          <p>Hi! I'm here to help you explore programs in AddRan College of Liberal Arts. What would you like to know?</p>
+          <p>Hi! I'm your advising assistant. What would you like to know?</p>
         </div>
       </div>
 
       <div class="suggested-prompts" id="suggested-prompts"></div>
     </main>
 
-    <p class="disclaimer">AI-generated responses may contain errors. Program details reflect the most recent data update and may not match the latest catalog. Confirm details with your advisor or department. Conversations are not linked to your student records. When used within an advising wizard, Sandra can see your course selections for that session.</p>
+    <p class="disclaimer">AI-generated responses may contain errors. Program details reflect the most recent data update and may not match the latest catalog. Confirm details with your advisor or department. Conversations are not linked to your student records. When used within an advising wizard, the assistant can see your course selections for that session.</p>
 
     <div class="toast" id="toast" role="alert" aria-live="assertive"></div>
 
@@ -70,6 +79,14 @@
     </form>
   </div>
 
+  <script>
+    // Only show chat UI in embed mode (loaded inside wizard iframe)
+    var isEmbedded = new URLSearchParams(window.location.search).get("embed") === "true";
+    if (isEmbedded) {
+      document.getElementById("unavailable").style.display = "none";
+      document.getElementById("chat-app").style.display = "";
+    }
+  </script>
   <script src="app.js"></script>
 </body>
 </html>
