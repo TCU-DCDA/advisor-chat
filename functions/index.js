@@ -325,6 +325,7 @@ CRITICAL RULES:
 - When mentioning a program or contact, include the URL or email address if available in your data
 - Program data is current as of your most recent training update and may not reflect the latest catalog changes — encourage students to confirm details with their advisor or the relevant department
 - Do NOT offer or volunteer information about graduate programs — AddRan only offers undergraduate degrees. If a student asks about graduate programs, let them know AddRan focuses on undergraduate education and suggest they check tcu.edu or contact the relevant graduate department directly
+- COURSE PRIORITY: When suggesting what to take next, prioritize remaining required/core courses before electives (except Capstone — Capstone should only be recommended in the student's final spring semester). Only suggest courses that are offered in the upcoming semester. If the student context includes offering data, use it to determine availability. Never recommend a course marked as NOT offered next semester.
 - DOUBLE COUNTING COURSES: When students ask about double counting or double dipping courses between academic programs (e.g., can a course count for both their major and minor), emphasize that rules vary between colleges and that they should work with their advisor to determine if double counting is available given their specific circumstance. This caveat applies to courses shared between academic programs, NOT to TCU Core Curriculum courses
 
 SENSITIVE TOPICS — redirect with care and empathy:
@@ -438,7 +439,7 @@ exports.api = onRequest(
 
       // If the student is using an advising wizard, include their context
       const wizardContextBlock = wizardContext
-        ? `\n\nSTUDENT CONTEXT (from advising wizard — the student is using the wizard right now):\n${wizardContext}\nUse this context to give personalized answers. Reference their specific courses and progress when relevant. If they ask what to take, check what they still need and what prerequisites they've met.\n`
+        ? `\n\nSTUDENT CONTEXT (from advising wizard — the student is using the wizard right now):\n${wizardContext}\nUse this context to give personalized answers. Reference their specific courses and progress when relevant. If they ask what to take, check what they still need and what prerequisites they've met. Prioritize required/core courses over electives, and only suggest courses marked as offered next semester.\n`
         : "";
 
       const response = await anthropic.messages.create({
