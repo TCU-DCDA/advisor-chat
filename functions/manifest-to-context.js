@@ -101,13 +101,18 @@ function formatProgram(program) {
     );
   }
 
-  // Highlighted courses for current term
+  // Highlighted courses for current term (deduplicated by code)
   if (program.highlightedCourses && program.highlightedCourses.courses) {
     const term = program.highlightedCourses.term || "Highlighted";
-    lines.push(`${term} Courses:`);
-    for (const c of program.highlightedCourses.courses.slice(0, 10)) {
-      const schedule = c.schedule ? ` (${c.schedule})` : "";
-      lines.push(`- ${c.code} ${c.title}${schedule}`);
+    const seen = new Set();
+    const unique = program.highlightedCourses.courses.filter((c) => {
+      if (seen.has(c.code)) return false;
+      seen.add(c.code);
+      return true;
+    });
+    lines.push(`${term} Courses (${unique.length} unique):`);
+    for (const c of unique) {
+      lines.push(`- ${c.code} ${c.title}`);
     }
   }
 
