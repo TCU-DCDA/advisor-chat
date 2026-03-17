@@ -4,6 +4,7 @@ const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 const Anthropic = require("@anthropic-ai/sdk");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { initManifestLoader, getAllManifests } = require("./manifest-loader");
@@ -189,6 +190,37 @@ const RATE_LIMITS = {
   feedback: { windowMs: 60 * 60 * 1000, maxRequests: 60 },   // 60/hour
 };
 
+// Retention windows for operational collections.
+const RETENTION_DAYS = {
+  conversations: 30,
+  feedback: 30,
+  rateLimits: 2,
+};
+
+const LOG_PREVIEW_MAX = 240;
+
+function hashText(value) {
+  return crypto.createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function sanitizeForLog(text) {
+  if (!text || typeof text !== "string") return "";
+
+  let safe = text.trim().replace(/\s+/g, " ");
+
+  // Basic PII redaction for operational logs.
+  safe = safe.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]");
+  safe = safe.replace(/\b\d{3}-\d{2}-\d{4}\b/g, "[ssn]");
+  safe = safe.replace(/\b(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g, "[phone]");
+  safe = safe.replace(/\b\d{8,10}\b/g, "[id]");
+
+  if (safe.length > LOG_PREVIEW_MAX) {
+    safe = `${safe.slice(0, LOG_PREVIEW_MAX)}…`;
+  }
+
+  return safe;
+}
+
 function getClientIp(req) {
   const forwarded = req.headers["x-forwarded-for"];
   if (forwarded) return forwarded.split(",")[0].trim();
@@ -202,8 +234,8 @@ async function checkRateLimit(endpoint, ip) {
   const now = Date.now();
   const windowStart = new Date(Math.floor(now / config.windowMs) * config.windowMs);
   const windowKey = windowStart.toISOString().substring(0, 13);
-  const sanitizedIp = ip.replace(/[.:]/g, "_");
-  const docRef = db.collection("rateLimits").doc(`${endpoint}:${sanitizedIp}:${windowKey}`);
+  const ipHash = hashText(ip).slice(0, 24);
+  const docRef = db.collection("rateLimits").doc(`${endpoint}:${ipHash}:${windowKey}`);
 
   try {
     const doc = await docRef.get();
@@ -212,9 +244,10 @@ async function checkRateLimit(endpoint, ip) {
       await docRef.set({
         count: 1,
         endpoint,
-        ip,
+        ipHash,
         windowStart,
         expiresAt: new Date(windowStart.getTime() + config.windowMs),
+        retentionDays: RETENTION_DAYS.rateLimits,
       });
       return { allowed: true };
     }
@@ -421,11 +454,16 @@ exports.api = onRequest(
 
       const assistantMessage = response.content[0].text;
 
-      // Log conversation (optional - for analytics)
+      // Log minimal conversation data for operations and analytics.
       await db.collection("conversations").add({
-        userMessage: message,
-        assistantMessage: assistantMessage,
+        userMessage: sanitizeForLog(message),
+        assistantMessage: sanitizeForLog(assistantMessage),
+        userMessageHash: hashText(message.trim().toLowerCase()),
+        assistantMessageHash: hashText(assistantMessage.trim().toLowerCase()),
+        userMessageLength: message.length,
+        assistantMessageLength: assistantMessage.length,
         timestamp: new Date(),
+        retentionDays: RETENTION_DAYS.conversations,
       });
 
       // Build combined program lookup: static programs + manifest programs
@@ -503,15 +541,22 @@ exports.feedback = onRequest(
         return;
       }
 
-      // Store feedback in Firestore
+      // Store minimal feedback data (redacted text + hashes)
+      const safeUserQuestion = userQuestion ? sanitizeForLog(userQuestion) : null;
+      const safeAssistantResponse = assistantResponse ? sanitizeForLog(assistantResponse) : null;
+      const safeSessionId = sessionId ? hashText(sessionId).slice(0, 16) : null;
+
       await db.collection("feedback").add({
         messageId,
-        userQuestion: userQuestion || null,
-        assistantResponse: assistantResponse || null,
+        userQuestion: safeUserQuestion,
+        assistantResponse: safeAssistantResponse,
+        userQuestionHash: userQuestion ? hashText(userQuestion.trim().toLowerCase()) : null,
+        assistantResponseHash: assistantResponse ? hashText(assistantResponse.trim().toLowerCase()) : null,
         rating,
-        sessionId: sessionId || null,
+        sessionId: safeSessionId,
         timestamp: timestamp ? new Date(timestamp) : new Date(),
-        createdAt: new Date()
+        createdAt: new Date(),
+        retentionDays: RETENTION_DAYS.feedback,
       });
 
       res.json({ success: true });
@@ -1398,6 +1443,54 @@ exports.backfillRelevanceScores = onRequest(
       scored,
       failed,
       results
+    });
+  }
+);
+
+async function purgeCollectionByDate(collectionName, field, cutoff, batchSize = 200) {
+  let deleted = 0;
+
+  while (true) {
+    const snapshot = await db.collection(collectionName)
+      .where(field, "<", cutoff)
+      .limit(batchSize)
+      .get();
+
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+    deleted += snapshot.size;
+
+    if (snapshot.size < batchSize) break;
+  }
+
+  return deleted;
+}
+
+// Daily retention cleanup for operational collections.
+exports.purgeRetention = onSchedule(
+  { schedule: "every day 03:30", timeZone: "America/Chicago" },
+  async () => {
+    const now = Date.now();
+    const conversationCutoff = new Date(now - RETENTION_DAYS.conversations * 24 * 60 * 60 * 1000);
+    const feedbackCutoff = new Date(now - RETENTION_DAYS.feedback * 24 * 60 * 60 * 1000);
+    const rateLimitCutoff = new Date(now - RETENTION_DAYS.rateLimits * 24 * 60 * 60 * 1000);
+
+    const [conversationsDeleted, feedbackDeleted, rateLimitsDeleted] = await Promise.all([
+      purgeCollectionByDate("conversations", "timestamp", conversationCutoff),
+      purgeCollectionByDate("feedback", "createdAt", feedbackCutoff),
+      purgeCollectionByDate("rateLimits", "expiresAt", rateLimitCutoff),
+    ]);
+
+    console.log("retention_purge_complete", {
+      conversationsDeleted,
+      feedbackDeleted,
+      rateLimitsDeleted,
+      conversationCutoff: conversationCutoff.toISOString(),
+      feedbackCutoff: feedbackCutoff.toISOString(),
+      rateLimitCutoff: rateLimitCutoff.toISOString(),
     });
   }
 );
