@@ -14,6 +14,7 @@ firestore-debug.log
 ui-debug.log
 
 # Source Excel files (large binaries — extracted data lives in functions/program-data/)
+other_programs/
 files/other_programs/*.xlsx
 files/other_programs/~$*
 
