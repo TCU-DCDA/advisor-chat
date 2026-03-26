@@ -399,7 +399,7 @@ exports.api = onRequest(
     }
 
     try {
-      const { message, conversationHistory = [], wizardContext, personaName } = req.body;
+      const { message, conversationHistory = [], wizardContext, personaName, stream } = req.body;
 
       if (!message) {
         res.status(400).json({ error: "Message is required" });
@@ -478,109 +478,181 @@ exports.api = onRequest(
 
       const systemPrompt = buildSystemPrompt(personaName) + wizardContextBlock + programContext + abbreviationsContext + manifestContext + programDetailsContext + coreCurriculumContext + laResearchContext + articlesContext;
 
-      let currentResponse = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: messages,
-        ...(wizardContext ? { tools: CLAUDE_TOOLS } : {}),
-      });
+      if (stream) {
+        // --- Streaming path (EngelinaPanel) ---
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
 
-      // Handle tool use — Claude may call report_categorization_issue
-      let finalMessages = [...messages];
-      while (currentResponse.stop_reason === "tool_use") {
-        const toolBlock = currentResponse.content.find(b => b.type === "tool_use");
-        if (!toolBlock) break;
+        let fullText = "";
 
-        if (toolBlock.name === "report_categorization_issue") {
-          const input = toolBlock.input;
-          const wizardSource = personaName === "Ada" ? "dcda"
-            : personaName === "Engelina" ? "english"
-            : "unknown";
-          const programMatch = wizardContext?.match(/^Program:\s*(.+?)(?:\s*\(|$)/m);
-          const programName = programMatch ? programMatch[1].trim() : null;
-
-          await db.collection("pending_corrections").add({
-            courseCode: input.courseCode || null,
-            currentCategory: input.currentCategory || null,
-            suggestedCorrection: sanitizeForLog(input.suggestedCorrection),
-            studentReasoning: sanitizeForLog(input.studentReasoning),
-            wizardSource,
-            programName,
-            timestamp: new Date(),
-            status: "pending",
-            retentionDays: RETENTION_DAYS.pendingCorrections,
+        try {
+          const sseStream = anthropic.messages.stream({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            system: systemPrompt,
+            messages: messages,
           });
+
+          sseStream.on("text", (text) => {
+            fullText += text;
+            res.write(`event: text\ndata: ${JSON.stringify({ text })}\n\n`);
+          });
+
+          await sseStream.finalMessage();
+
+          // Log minimal conversation data for operations and analytics.
+          await db.collection("conversations").add({
+            userMessage: sanitizeForLog(message),
+            assistantMessage: sanitizeForLog(fullText),
+            userMessageHash: hashText(message.trim().toLowerCase()),
+            assistantMessageHash: hashText(fullText.trim().toLowerCase()),
+            userMessageLength: message.length,
+            assistantMessageLength: fullText.length,
+            timestamp: new Date(),
+            retentionDays: RETENTION_DAYS.conversations,
+          });
+
+          // Build combined program lookup: static programs + manifest programs
+          const combinedLookup = new Map(programLookup);
+          for (const [, data] of manifests) {
+            for (const slim of extractProgramsForLookup(data.manifest)) {
+              const key = slim.name.toLowerCase();
+              if (combinedLookup.has(key)) {
+                const existing = combinedLookup.get(key);
+                if (!existing.degree.includes(slim.degree)) {
+                  existing.degree = existing.degree + ", " + slim.degree;
+                }
+                if (slim.url && !existing.url) existing.url = slim.url;
+              } else {
+                combinedLookup.set(key, slim);
+              }
+            }
+          }
+
+          const programMentions = detectProgramMentions(fullText, combinedLookup);
+
+          res.write(`event: done\ndata: ${JSON.stringify({
+            programMentions,
+            conversationHistory: [
+              ...conversationHistory,
+              { role: "user", content: message },
+              { role: "assistant", content: fullText },
+            ],
+          })}\n\n`);
+
+          res.end();
+        } catch (streamError) {
+          console.error("Streaming error:", streamError);
+          res.write(`event: error\ndata: ${JSON.stringify({ error: "Something went wrong." })}\n\n`);
+          res.end();
         }
-
-        // Send tool result back to Claude for its text response
-        finalMessages = [
-          ...finalMessages,
-          { role: "assistant", content: currentResponse.content },
-          {
-            role: "user",
-            content: [{
-              type: "tool_result",
-              tool_use_id: toolBlock.id,
-              content: "Categorization issue logged successfully. Thank the student and encourage them to also mention this in their 'Notes or Questions for Advisor' field so it appears in their PDF export for their advisor.",
-            }],
-          },
-        ];
-
-        currentResponse = await anthropic.messages.create({
+      } else {
+        // --- Non-streaming path (AdaPanel) — unchanged ---
+        let currentResponse = await anthropic.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1024,
           system: systemPrompt,
-          messages: finalMessages,
-          tools: CLAUDE_TOOLS,
+          messages: messages,
+          ...(wizardContext ? { tools: CLAUDE_TOOLS } : {}),
         });
-      }
 
-      const assistantMessage = currentResponse.content
-        .filter(b => b.type === "text")
-        .map(b => b.text)
-        .join("");
+        // Handle tool use — Claude may call report_categorization_issue
+        let finalMessages = [...messages];
+        while (currentResponse.stop_reason === "tool_use") {
+          const toolBlock = currentResponse.content.find(b => b.type === "tool_use");
+          if (!toolBlock) break;
 
-      // Log minimal conversation data for operations and analytics.
-      await db.collection("conversations").add({
-        userMessage: sanitizeForLog(message),
-        assistantMessage: sanitizeForLog(assistantMessage),
-        userMessageHash: hashText(message.trim().toLowerCase()),
-        assistantMessageHash: hashText(assistantMessage.trim().toLowerCase()),
-        userMessageLength: message.length,
-        assistantMessageLength: assistantMessage.length,
-        timestamp: new Date(),
-        retentionDays: RETENTION_DAYS.conversations,
-      });
+          if (toolBlock.name === "report_categorization_issue") {
+            const input = toolBlock.input;
+            const wizardSource = personaName === "Ada" ? "dcda"
+              : personaName === "Engelina" ? "english"
+              : "unknown";
+            const programMatch = wizardContext?.match(/^Program:\s*(.+?)(?:\s*\(|$)/m);
+            const programName = programMatch ? programMatch[1].trim() : null;
 
-      // Build combined program lookup: static programs + manifest programs
-      const combinedLookup = new Map(programLookup);
-      for (const [, data] of manifests) {
-        for (const slim of extractProgramsForLookup(data.manifest)) {
-          const key = slim.name.toLowerCase();
-          if (combinedLookup.has(key)) {
-            const existing = combinedLookup.get(key);
-            if (!existing.degree.includes(slim.degree)) {
-              existing.degree = existing.degree + ", " + slim.degree;
+            await db.collection("pending_corrections").add({
+              courseCode: input.courseCode || null,
+              currentCategory: input.currentCategory || null,
+              suggestedCorrection: sanitizeForLog(input.suggestedCorrection),
+              studentReasoning: sanitizeForLog(input.studentReasoning),
+              wizardSource,
+              programName,
+              timestamp: new Date(),
+              status: "pending",
+              retentionDays: RETENTION_DAYS.pendingCorrections,
+            });
+          }
+
+          // Send tool result back to Claude for its text response
+          finalMessages = [
+            ...finalMessages,
+            { role: "assistant", content: currentResponse.content },
+            {
+              role: "user",
+              content: [{
+                type: "tool_result",
+                tool_use_id: toolBlock.id,
+                content: "Categorization issue logged successfully. Thank the student and encourage them to also mention this in their 'Notes or Questions for Advisor' field so it appears in their PDF export for their advisor.",
+              }],
+            },
+          ];
+
+          currentResponse = await anthropic.messages.create({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 1024,
+            system: systemPrompt,
+            messages: finalMessages,
+            tools: CLAUDE_TOOLS,
+          });
+        }
+
+        const assistantMessage = currentResponse.content
+          .filter(b => b.type === "text")
+          .map(b => b.text)
+          .join("");
+
+        // Log minimal conversation data for operations and analytics.
+        await db.collection("conversations").add({
+          userMessage: sanitizeForLog(message),
+          assistantMessage: sanitizeForLog(assistantMessage),
+          userMessageHash: hashText(message.trim().toLowerCase()),
+          assistantMessageHash: hashText(assistantMessage.trim().toLowerCase()),
+          userMessageLength: message.length,
+          assistantMessageLength: assistantMessage.length,
+          timestamp: new Date(),
+          retentionDays: RETENTION_DAYS.conversations,
+        });
+
+        // Build combined program lookup: static programs + manifest programs
+        const combinedLookup = new Map(programLookup);
+        for (const [, data] of manifests) {
+          for (const slim of extractProgramsForLookup(data.manifest)) {
+            const key = slim.name.toLowerCase();
+            if (combinedLookup.has(key)) {
+              const existing = combinedLookup.get(key);
+              if (!existing.degree.includes(slim.degree)) {
+                existing.degree = existing.degree + ", " + slim.degree;
+              }
+              if (slim.url && !existing.url) existing.url = slim.url;
+            } else {
+              combinedLookup.set(key, slim);
             }
-            if (slim.url && !existing.url) existing.url = slim.url;
-          } else {
-            combinedLookup.set(key, slim);
           }
         }
+
+        const programMentions = detectProgramMentions(assistantMessage, combinedLookup);
+
+        res.json({
+          message: assistantMessage,
+          programMentions: programMentions,
+          conversationHistory: [
+            ...conversationHistory,
+            { role: "user", content: message },
+            { role: "assistant", content: assistantMessage }
+          ]
+        });
       }
-
-      const programMentions = detectProgramMentions(assistantMessage, combinedLookup);
-
-      res.json({
-        message: assistantMessage,
-        programMentions: programMentions,
-        conversationHistory: [
-          ...conversationHistory,
-          { role: "user", content: message },
-          { role: "assistant", content: assistantMessage }
-        ]
-      });
     } catch (error) {
       console.error("Error:", error);
       res.status(500).json({ error: "Something went wrong. Please try again." });
