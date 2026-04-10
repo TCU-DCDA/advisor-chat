@@ -84,6 +84,34 @@
 
 ---
 
+## Wizard Manifest Integration
+
+Sandra consumes department-wizard manifests via a registry + live-fetch + cache chain so that wizard content changes reach the chatbot without code deploys.
+
+### ✅ Completed
+
+- [x] **Manifest loader** — live fetch with TTL + stale-while-revalidate, Firestore backup cache, static-file fallback (`functions/manifest-loader.js`)
+- [x] **Manifest-to-context converter** — transforms wizard manifests into markdown sections for Claude's system prompt (`functions/manifest-to-context.js`)
+- [x] **Wizard registry** — maps departments to live manifest URLs and fallback program IDs (`functions/wizard-registry.json`)
+- [x] **Schema validation** — AJV-based validation on every fetch; rejects manifests that don't match `functions/schemas/manifest.schema.json`
+- [x] **DCDA full-visibility fix (2026-04-10)** — converter now surfaces the full `courseCatalog` with descriptions, no longer truncates category course lists at 6 items, and handles `highlightedCourses` as both the legacy single-term object and the current array-of-term-objects shape (schema `oneOf`). POSC 31453 and every course past category index 6 is now reachable.
+- [x] **Prompt-side precision rules (2026-04-10)** — added `COUNTING COURSES` rule (count unique codes, not occurrences) and replaced the obsolete "data may be outdated" instruction with language acknowledging the live manifest refresh.
+- [x] **DCDA Firestore source of truth (2026-04-10)** — the DCDA wizard's generator now reads offerings directly from Firestore (`dcda_config/offerings_*`) via ADC, emitting every upcoming term instead of just one. Eliminates the silent drift where Admin-UI edits never reached Sandra until someone manually exported JSON files.
+
+### 🔜 Next Up — English wizard (Engelina)
+
+- [ ] **Add `courseCatalog` emitter** to `english-advising-wizard/scripts/generate-manifest.js`. Sandra's converter already knows how to surface the catalog when present — the only work is on the wizard side.
+- [ ] **Triage English offerings files** — `src/data/` has 5 files (`offerings-fa25.json`, `offerings-fa26.json`, `offerings-fa26-2026-03-09.json` timestamped dupe, `offerings-sp26.json`, `offerings-wi26.json`). Identify what's authoritative and retire the rest.
+- [ ] **Determine English's Firestore usage** — `firebase-admin` is not currently a dependency, suggesting static-JSON-only. Verify by grepping `src/` before deciding whether English also needs a Firestore migration.
+- [ ] **Deploy and verify** — rebuild English wizard, confirm manifest has `courseCatalog > 0`, ask Engelina a course-level question, tail Sandra logs for a fresh `manifest_fetch_success` against English.
+
+### 💡 Future Ideas
+
+- [ ] **Cloud Function auto-regenerate** — Firestore trigger on `dcda_config/*` writes could regenerate and publish the manifest automatically, eliminating the `npm run build && firebase deploy` step from the feedback loop. Considered complex enough to scope as its own phase.
+- [ ] **Retire static `data/offerings-*.json` files** in dcda-advising-wizard once the Firestore-only path has proven stable in production.
+
+---
+
 ## Security / Infrastructure
 
 ### ✅ Completed
