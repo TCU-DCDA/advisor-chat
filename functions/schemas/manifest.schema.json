@@ -149,12 +149,32 @@
         },
         "prerequisites": {
           "type": "object",
-          "description": "Course prerequisite mapping",
+          "description": "Course prerequisite mapping. Legacy shape (DCDA) is a flat array of course codes. Current shape (English) is a {require, recommend, note} object supporting AND-of-OR groups. Sandra's converter ignores this field either way.",
           "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+            "oneOf": [
+              {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "require": {
+                    "type": "array",
+                    "description": "AND-of-OR groups: each inner array is an OR-group; ALL groups must be satisfied.",
+                    "items": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  },
+                  "recommend": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "note": { "type": "string" }
+                }
+              }
+            ]
           }
         },
         "fourYearPlan": {
