@@ -443,21 +443,34 @@ exports.api = onRequest(
       // Fetch wizard manifests (SWR — fast if cached, triggers background refresh if stale)
       const manifests = await getAllManifests();
 
+      // Persona scope: Sandra (college-level hub) sees every manifest and all
+      // non-wizard program-data files. Departmental personas (Ada for DCDA,
+      // Engelina for English) only see their own manifest — cross-department
+      // content bloats the system prompt and pushes requests past the ITPM
+      // budget without providing relevant answers.
+      const personaScope = personaName === "Ada"
+        ? { department: "Digital Culture and Data Analytics", includeOtherPrograms: false }
+        : personaName === "Engelina"
+          ? { department: "English", includeOtherPrograms: false }
+          : { department: null, includeOtherPrograms: true };
+
       // Build manifest-based context (replaces hardcoded English + DCDA contexts)
       let manifestContext = "";
       const manifestProgramNames = new Set();
       const normalizeName = (n) => n.toLowerCase().replace(/&/g, "and");
-      for (const [, data] of manifests) {
+      for (const [dept, data] of manifests) {
+        if (personaScope.department && dept !== personaScope.department) continue;
         manifestContext += manifestToContext(data);
         for (const p of extractProgramsForLookup(data.manifest)) {
           manifestProgramNames.add(normalizeName(p.name));
         }
       }
 
-      // Build program details context, excluding programs covered by manifests
-      const nonWizardPrograms = programDetails.filter(
-        p => !manifestProgramNames.has(normalizeName(p.name))
-      );
+      // Build program details context, excluding programs covered by manifests.
+      // Departmental personas skip this entirely.
+      const nonWizardPrograms = personaScope.includeOtherPrograms
+        ? programDetails.filter(p => !manifestProgramNames.has(normalizeName(p.name)))
+        : [];
       const programDetailsContext = buildProgramDetailsContext(nonWizardPrograms);
 
       // Build messages array for Claude
@@ -477,7 +490,28 @@ exports.api = onRequest(
         ? `\n\nSTUDENT CONTEXT (from advising wizard — the student is using the wizard right now):\n${wizardContext}\nUse this context to give personalized answers. Reference their specific courses and progress when relevant. If they ask what to take, check what they still need and what prerequisites they've met. Prioritize required/core courses over electives, and only suggest courses marked as offered next semester.\n`
         : "";
 
-      const systemPrompt = buildSystemPrompt(personaName) + wizardContextBlock + programContext + abbreviationsContext + manifestContext + programDetailsContext + coreCurriculumContext + laResearchContext + articlesContext;
+      // Stable prefix: persona + static and slowly-changing content. Ordered
+      // so volatile per-turn content (wizardContextBlock, user message) comes
+      // AFTER the cache breakpoint. Prompt caching is a prefix match — any
+      // byte change before the breakpoint invalidates the cache.
+      const stableSystemPrompt = buildSystemPrompt(personaName) + programContext + abbreviationsContext + manifestContext + programDetailsContext + coreCurriculumContext + laResearchContext + articlesContext;
+
+      const systemBlocks = [
+        { type: "text", text: stableSystemPrompt, cache_control: { type: "ephemeral" } },
+      ];
+      if (wizardContextBlock) {
+        systemBlocks.push({ type: "text", text: wizardContextBlock });
+      }
+
+      // Hash the stable prefix to detect silent invalidators across requests.
+      const stableHash = crypto.createHash("sha256").update(stableSystemPrompt).digest("hex").slice(0, 12);
+      console.log(JSON.stringify({
+        message: "stable_prefix_hash",
+        personaName,
+        stableHash,
+        stableLength: stableSystemPrompt.length,
+        toolCount: wizardContext ? CLAUDE_TOOLS.length : 0,
+      }));
 
       if (stream) {
         // --- Streaming path (EngelinaPanel) ---
@@ -491,7 +525,7 @@ exports.api = onRequest(
           const sseStream = anthropic.messages.stream({
             model: "claude-sonnet-4-20250514",
             max_tokens: 1024,
-            system: systemPrompt,
+            system: systemBlocks,
             messages: messages,
           });
 
@@ -500,7 +534,13 @@ exports.api = onRequest(
             res.write(`event: text\ndata: ${JSON.stringify({ text })}\n\n`);
           });
 
-          await sseStream.finalMessage();
+          const finalMsg = await sseStream.finalMessage();
+          console.log(JSON.stringify({
+            message: "claude_usage",
+            path: "stream",
+            personaName,
+            usage: finalMsg.usage,
+          }));
 
           // Log minimal conversation data for operations and analytics.
           await db.collection("conversations").add({
@@ -553,10 +593,16 @@ exports.api = onRequest(
         let currentResponse = await anthropic.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1024,
-          system: systemPrompt,
+          system: systemBlocks,
           messages: messages,
           ...(wizardContext ? { tools: CLAUDE_TOOLS } : {}),
         });
+        console.log(JSON.stringify({
+          message: "claude_usage",
+          path: "create",
+          personaName,
+          usage: currentResponse.usage,
+        }));
 
         // Handle tool use — Claude may call report_categorization_issue
         let finalMessages = [...messages];
@@ -602,7 +648,7 @@ exports.api = onRequest(
           currentResponse = await anthropic.messages.create({
             model: "claude-sonnet-4-20250514",
             max_tokens: 1024,
-            system: systemPrompt,
+            system: systemBlocks,
             messages: finalMessages,
             tools: CLAUDE_TOOLS,
           });
