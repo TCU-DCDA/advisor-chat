@@ -301,14 +301,29 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+// Persona registry — canonical casing, department scope, and wizard-source
+// tag. `resolvePersona` is case- and whitespace-insensitive so a client that
+// sends "ada" or " Engelina " does not silently escalate to Sandra's
+// college-wide scope (all manifests + 60 program-data files).
+const PERSONA_CONFIG = {
+  ada:      { canonical: "Ada",      department: "Digital Culture and Data Analytics", wizardSource: "dcda" },
+  engelina: { canonical: "Engelina", department: "English",                             wizardSource: "english" },
+};
+
+function resolvePersona(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  const key = raw.trim().toLowerCase();
+  return PERSONA_CONFIG[key] || null;
+}
+
 // System prompt for the AddRan advisor chatbot
-// personaName is passed from the embedding wizard (e.g. "Engelina", "Ada")
-function buildSystemPrompt(personaName) {
-  const name = personaName || "your AddRan advising assistant";
-  const intro = personaName
+// canonicalPersonaName is resolved via resolvePersona (e.g. "Engelina", "Ada")
+function buildSystemPrompt(canonicalPersonaName) {
+  const name = canonicalPersonaName || "your AddRan advising assistant";
+  const intro = canonicalPersonaName
     ? `You are ${name}, a friendly advisor for AddRan College of Liberal Arts at TCU.`
     : `You are a friendly advisor for AddRan College of Liberal Arts at TCU.`;
-  const greeting = personaName
+  const greeting = canonicalPersonaName
     ? `If this is the start of a conversation, briefly introduce yourself: "Hi, I'm ${name}, your advising assistant!"`
     : `If this is the start of a conversation, briefly introduce yourself: "Hi, I'm your AddRan advising assistant!"`;
 
@@ -401,6 +416,14 @@ exports.api = onRequest(
 
     try {
       const { message, conversationHistory = [], wizardContext, personaName, stream } = req.body;
+      const persona = resolvePersona(personaName);
+      const canonicalPersonaName = persona ? persona.canonical : null;
+      if (personaName && !persona) {
+        console.warn(JSON.stringify({
+          message: "unknown_persona_name",
+          rawPersonaName: personaName,
+        }));
+      }
 
       if (!message) {
         res.status(400).json({ error: "Message is required" });
@@ -435,7 +458,7 @@ exports.api = onRequest(
       // Build articles context
       const articlesContext = articles.length > 0
         ? `\n\n## Articles on Liberal Arts Value\nUse these when students ask about the value of liberal arts or need talking points for skeptical family:\n${articles.map(a => {
-          const dateStr = a.date && a.date.toDate ? a.date.toDate().toLocaleDateString() : "recent";
+          const dateStr = a.date && a.date.toDate ? a.date.toDate().toLocaleDateString("en-US") : "recent";
           return `- "${a.title}" (${a.source}, ${dateStr}): ${a.summary} [${a.url}]`;
         }).join("\n")}\n\nIMPORTANT: Cite articles by title, source, and link. Do not synthesize claims across articles.`
         : "";
@@ -448,11 +471,9 @@ exports.api = onRequest(
       // Engelina for English) only see their own manifest — cross-department
       // content bloats the system prompt and pushes requests past the ITPM
       // budget without providing relevant answers.
-      const personaScope = personaName === "Ada"
-        ? { department: "Digital Culture and Data Analytics", includeOtherPrograms: false }
-        : personaName === "Engelina"
-          ? { department: "English", includeOtherPrograms: false }
-          : { department: null, includeOtherPrograms: true };
+      const personaScope = persona
+        ? { department: persona.department, includeOtherPrograms: false }
+        : { department: null, includeOtherPrograms: true };
 
       // Build manifest-based context (replaces hardcoded English + DCDA contexts)
       let manifestContext = "";
@@ -494,7 +515,7 @@ exports.api = onRequest(
       // so volatile per-turn content (wizardContextBlock, user message) comes
       // AFTER the cache breakpoint. Prompt caching is a prefix match — any
       // byte change before the breakpoint invalidates the cache.
-      const stableSystemPrompt = buildSystemPrompt(personaName) + programContext + abbreviationsContext + manifestContext + programDetailsContext + coreCurriculumContext + laResearchContext + articlesContext;
+      const stableSystemPrompt = buildSystemPrompt(canonicalPersonaName) + programContext + abbreviationsContext + manifestContext + programDetailsContext + coreCurriculumContext + laResearchContext + articlesContext;
 
       const systemBlocks = [
         { type: "text", text: stableSystemPrompt, cache_control: { type: "ephemeral" } },
@@ -507,7 +528,7 @@ exports.api = onRequest(
       const stableHash = crypto.createHash("sha256").update(stableSystemPrompt).digest("hex").slice(0, 12);
       console.log(JSON.stringify({
         message: "stable_prefix_hash",
-        personaName,
+        personaName: canonicalPersonaName,
         stableHash,
         stableLength: stableSystemPrompt.length,
         toolCount: wizardContext ? CLAUDE_TOOLS.length : 0,
@@ -538,7 +559,7 @@ exports.api = onRequest(
           console.log(JSON.stringify({
             message: "claude_usage",
             path: "stream",
-            personaName,
+            personaName: canonicalPersonaName,
             usage: finalMsg.usage,
           }));
 
@@ -600,7 +621,7 @@ exports.api = onRequest(
         console.log(JSON.stringify({
           message: "claude_usage",
           path: "create",
-          personaName,
+          personaName: canonicalPersonaName,
           usage: currentResponse.usage,
         }));
 
@@ -612,9 +633,7 @@ exports.api = onRequest(
 
           if (toolBlock.name === "report_categorization_issue") {
             const input = toolBlock.input;
-            const wizardSource = personaName === "Ada" ? "dcda"
-              : personaName === "Engelina" ? "english"
-              : "unknown";
+            const wizardSource = persona ? persona.wizardSource : "unknown";
             const programMatch = wizardContext?.match(/^Program:\s*(.+?)(?:\s*\(|$)/m);
             const programName = programMatch ? programMatch[1].trim() : null;
 
