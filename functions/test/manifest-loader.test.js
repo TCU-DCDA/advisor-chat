@@ -29,10 +29,7 @@ function createMockFirestore(seed = {}) {
 }
 
 function loadDcdaManifestFixture() {
-  const fixturePath = path.resolve(
-    __dirname,
-    "../../../dcda-advising-wizard/public/advising-manifest.json"
-  );
+  const fixturePath = path.resolve(__dirname, "fixtures/dcda-manifest.json");
   return JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 }
 
